@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtNetwork/QNetworkProxy>
 #include <cmath>
 #include <set>
+#include <filesystem>
 
 #if __has_include(<kurlmimedata.h>)
 #include <kurlmimedata.h>
@@ -51,26 +52,27 @@ inline QList<QUrl> GetMimeUrls(const QMimeData *data) {
 }
 #endif
 
-#if __has_include(<ksandbox.h>) && defined DeclareReadSetting
-inline QString FlatpakID() {
-	static const auto Result = [] {
-		if (!qEnvironmentVariableIsEmpty("FLATPAK_ID")) {
-			return qEnvironmentVariable("FLATPAK_ID");
-		} else {
-			return cExeName();
-		}
-	}();
-
-	return Result;
-}
-
+#if __has_include(<ksandbox.h>)
 inline QString IconName() {
 	static const auto Result = KSandbox::isFlatpak()
-		? FlatpakID()
+		? qEnvironmentVariable("FLATPAK_ID")
 		: qsl("telegram");
 	return Result;
 }
 #endif
+
+inline bool CanReadDirectory(const QString &path) {
+#ifndef Q_OS_MAC // directory_iterator since 10.15
+	try {
+		std::filesystem::directory_iterator(path.toStdString());
+		return true;
+	} catch (...) {
+		return false;
+	}
+#else
+	Unexpected("Not implemented.");
+#endif
+}
 
 } // namespace base
 
