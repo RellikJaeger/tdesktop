@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/box_content_divider.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/boxes/report_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/generic_box.h"
@@ -372,13 +373,48 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 
 		const auto usernameLine = addInfoOneLine(
 			UsernamesSubtext(_peer, tr::lng_info_username_label()),
-			UsernameValue(user, true),
-			tr::lng_context_copy_mention(tr::now),
+			UsernameValue(user, true) | rpl::map([=](TextWithEntities u) {
+				return u.text.isEmpty()
+					? TextWithEntities()
+					: Ui::Text::Link(
+						u,
+						user->session().createInternalLinkFull(
+							u.text.mid(1)));
+			}),
+			QString(),
 			st::infoProfileLabeledUsernamePadding);
-		usernameLine.subtext->overrideLinkClickHandler(UsernamesLinkCallback(
+		const auto callback = UsernamesLinkCallback(
 			_peer,
 			Window::Show(controller),
-			QString()));
+			QString());
+		const auto hook = [=](Ui::FlatLabel::ContextMenuRequest request) {
+			if (!request.link) {
+				return;
+			}
+			const auto text = request.link->copyToClipboardContextItemText();
+			if (text.isEmpty()) {
+				return;
+			}
+			const auto link = request.link->copyToClipboardText();
+			request.menu->addAction(
+				text,
+				[=] { QGuiApplication::clipboard()->setText(link); });
+			const auto last = link.lastIndexOf('/');
+			if (last < 0) {
+				return;
+			}
+			const auto mention = '@' + link.mid(last + 1);
+			if (mention.size() < 2) {
+				return;
+			}
+			request.menu->addAction(
+				tr::lng_context_copy_mention(tr::now),
+				[=] { QGuiApplication::clipboard()->setText(mention); });
+		};
+		usernameLine.text->overrideLinkClickHandler(callback);
+		usernameLine.subtext->overrideLinkClickHandler(callback);
+		usernameLine.text->setContextMenuHook(hook);
+		usernameLine.subtext->setContextMenuHook(hook);
 		const auto usernameLabel = usernameLine.text;
 		if (user->isBot()) {
 			const auto copyUsername = Ui::CreateChild<Ui::IconButton>(

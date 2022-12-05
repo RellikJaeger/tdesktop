@@ -1,8 +1,8 @@
 {%- set GIT = "https://github.com" -%}
 {%- set GIT_FREEDESKTOP = GIT ~ "/gitlab-freedesktop-mirrors" -%}
-{%- set QT = "6_4_0" -%}
-{%- set QT_TAG = "v6.4.0" -%}
-{%- set QT_PREFIX = "/usr/local/desktop-app/Qt-6.4.0" -%}
+{%- set QT = "6_4_1" -%}
+{%- set QT_TAG = "v6.4.1" -%}
+{%- set QT_PREFIX = "/usr/local/desktop-app/Qt-6.4.1" -%}
 {%- set OPENSSL_VER = "1_1_1" -%}
 {%- set OPENSSL_PREFIX = "/usr/local/desktop-app/openssl-1.1.1" -%}
 {%- set CMAKE_VER = "3.24.3" -%}
@@ -21,7 +21,7 @@ ENV PKG_CONFIG_PATH /usr/local/lib64/pkgconfig:/usr/local/lib/pkgconfig:/usr/loc
 RUN yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm \
 	&& yum -y install https://packages.endpointdev.com/rhel/7/os/x86_64/endpoint-repo.x86_64.rpm \
 	&& yum -y install centos-release-scl \
-	&& yum -y install git python3-pip autoconf automake libtool patch \
+	&& yum -y install git rh-python38-python-pip autoconf automake libtool patch \
 		fontconfig-devel freetype-devel libX11-devel at-spi2-core-devel alsa-lib-devel \
 		pulseaudio-libs-devel mesa-libGL-devel mesa-libEGL-devel mesa-libgbm-devel \
 		libdrm-devel vulkan-devel gtk3-devel \
@@ -31,14 +31,14 @@ RUN yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.n
 		llvm-toolset-7.0-llvm-devel \
 	&& yum clean all
 
-RUN python3 -m pip install meson ninja
-
 # Fix a bug with argument naming in CentOS 7 glibc
 RUN sed -i 's/char \*__block/char */' /usr/include/unistd.h
 
-SHELL [ "bash", "-c", ". /opt/rh/devtoolset-10/enable; exec bash -c \"$@\"", "-s"]
+SHELL [ "bash", "-c", ". /opt/rh/rh-python38/enable; . /opt/rh/devtoolset-10/enable; exec bash -c \"$@\"", "-s"]
 
 WORKDIR {{ LibrariesPath }}
+
+RUN python3 -m pip install meson ninja
 
 RUN mkdir /opt/cmake \
 	&& curl -sSLo {{ CMAKE_FILE }} {{ GIT }}/Kitware/CMake/releases/download/v{{ CMAKE_VER }}/{{ CMAKE_FILE }} \
@@ -56,7 +56,7 @@ ENV CXXFLAGS $CFLAGS
 FROM builder AS patches
 RUN git clone {{ GIT }}/desktop-app/patches.git \
 	&& cd patches \
-	&& git checkout b3b5f5cf92 \
+	&& git checkout c1f8effd69 \
 	&& rm -rf .git
 
 FROM builder AS nasm
@@ -97,6 +97,28 @@ RUN git clone -b v5.2.5 https://git.tukaani.org/xz.git \
 	&& DESTDIR="{{ LibrariesPath }}/xz-cache" cmake --install build \
 	&& cd .. \
 	&& rm -rf xz
+
+FROM builder AS protobuf
+RUN git clone --recursive -b v21.9 https://github.com/protocolbuffers/protobuf \
+    && cd protobuf \
+    && git clone https://github.com/abseil/abseil-cpp third_party/abseil-cpp \
+    && cd third_party/abseil-cpp \
+    && git checkout 273292d1cf \
+    && cd ../.. \
+    && mkdir build \
+    && cd build \
+    && cmake -GNinja .. \
+    	-DCMAKE_BUILD_TYPE=None \
+		-DCMAKE_C_FLAGS="$CFLAGS" \
+		-DCMAKE_CXX_FLAGS="$CXXFLAGS" \
+        -Dprotobuf_BUILD_TESTS=OFF \
+        -Dprotobuf_BUILD_PROTOBUF_BINARIES=ON \
+        -Dprotobuf_BUILD_LIBPROTOC=ON \
+        -Dprotobuf_WITH_ZLIB_DEFAULT=OFF \
+        -Dprotobuf_DEBUG_POSTFIX="" \
+    && cmake --build . --parallel \
+    && cd .. \
+    && rm -rf .git
 
 FROM patches AS libproxy
 RUN git clone -b 0.4.17 --depth=1 {{ GIT }}/libproxy/libproxy.git \
@@ -759,6 +781,7 @@ FROM builder-base
 COPY --link --from=libffi {{ LibrariesPath }}/libffi-cache /
 COPY --link --from=zlib {{ LibrariesPath }}/zlib-cache /
 COPY --link --from=xz {{ LibrariesPath }}/xz-cache /
+COPY --link --from=protobuf {{ LibrariesPath }}/protobuf protobuf
 COPY --link --from=libproxy {{ LibrariesPath }}/libproxy-cache /
 COPY --link --from=lcms2 {{ LibrariesPath }}/lcms2-cache /
 COPY --link --from=brotli {{ LibrariesPath }}/brotli-cache /
@@ -802,4 +825,5 @@ COPY --link --from=webrtc_debug {{ LibrariesPath }}/tg_owt/out/Debug tg_owt/out/
 
 WORKDIR ../tdesktop
 VOLUME [ "/usr/src/tdesktop" ]
+ENTRYPOINT [ "scl", "enable", "rh-python38", "--", "scl", "enable", "llvm-toolset-7.0", "--", "scl", "enable", "devtoolset-10", "--" ]
 CMD [ "/usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh" ]

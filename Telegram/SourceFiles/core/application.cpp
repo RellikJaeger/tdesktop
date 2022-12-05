@@ -91,6 +91,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/premium_limits_box.h"
 #include "ui/boxes/confirm_box.h"
 
+#include <QtCore/QStandardPaths>
 #include <QtCore/QMimeDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
@@ -236,6 +237,7 @@ void Application::run() {
 	refreshGlobalProxy(); // Depends on app settings being read.
 
 	if (const auto old = Local::oldSettingsVersion(); old < AppVersion) {
+		Platform::InstallLauncher();
 		RegisterUrlScheme();
 		Platform::NewVersionLaunched(old);
 	}
@@ -248,6 +250,15 @@ void Application::run() {
 		Platform::AutostartToggle(false);
 		Quit();
 		return;
+	}
+
+	if (KSandbox::isInside()) {
+		const auto path = settings().downloadPath();
+		if (!path.isEmpty()
+			&& path != qstr("tmp")
+			&& !base::CanReadDirectory(path)) {
+			settings().setDownloadPath(QString());
+		}
 	}
 
 	_translator = std::make_unique<Lang::Translator>();
@@ -588,9 +599,15 @@ void Application::saveSettings() {
 }
 
 bool Application::canSaveFileWithoutAskingForPath() const {
-	return !Core::App().settings().askDownloadPath()
-		&& (!KSandbox::isInside()
-			|| !Core::App().settings().downloadPath().isEmpty());
+	if (Core::App().settings().askDownloadPath()) {
+		return false;
+	} else if (KSandbox::isInside()
+		&& Core::App().settings().downloadPath().isEmpty()) {
+		const auto path = QStandardPaths::writableLocation(
+			QStandardPaths::DownloadLocation);
+		return base::CanReadDirectory(path);
+	}
+	return true;
 }
 
 MTP::Config &Application::fallbackProductionConfig() const {
@@ -1446,7 +1463,9 @@ void Application::startShortcuts() {
 void Application::RegisterUrlScheme() {
 	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{
 		.executable = cExeDir() + cExeName(),
-		.arguments = qsl("-workdir \"%1\"").arg(cWorkingDir()),
+		.arguments = Sandbox::Instance().customWorkingDir()
+			? qsl("-workdir \"%1\"").arg(cWorkingDir())
+			: QString(),
 		.protocol = qsl("tg"),
 		.protocolName = qsl("Telegram Link"),
 		.shortAppName = qsl("tdesktop"),
